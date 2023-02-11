@@ -8,6 +8,8 @@ from dynamixel_sdk import * # Uses Dynamixel SDK library
 
 import rospy
 from std_msgs.msg import Int32, String, Float32
+from geometry_msgs.msg import Vector3
+
 
 from time import sleep
 
@@ -30,34 +32,38 @@ PROTOCOL_VERSION            = 2.0
 VELOCITY_LIMIT = 1023
 VELOCITY_UNIT = 0.229 # RPM
 
-RIGHT_LOWER_ARM_YAW_ID = 4
-LEFT_SHOULDER_PITCH_ID = 19
-LEFT_SHOULDER_ROLL_ID = 20
-LEFT_ELBOW_ROLL_ID = 21
-RIGHT_SHOULDER_PITCH_ID = 22
-RIGHT_SHOULDER_ROLL_ID = 23
-RIGHT_ELBOW_ROLL_ID = 24
+LEFT_SHOULDER_PITCH_ID = 4
+LEFT_SHOULDER_ROLL_ID = 5
+LEFT_ELBOW_ROLL_ID = 6
+RIGHT_SHOULDER_PITCH_ID = 3
+RIGHT_SHOULDER_ROLL_ID = 2
+RIGHT_ELBOW_ROLL_ID = 1
 
-BASE_ROTATION_MOTOR_ID = 1
+BASE_ROLL_MOTOR_ID = 7
+BASE_ROTATION_MOTOR_ID = 8
 
-RIGHT_LOWER_ARM_YAW_INITIAL = 2048
-LEFT_SHOULDER_PITCH_INITIAL  = 3400
-LEFT_SHOULDER_ROLL_INITIAL  = 3072
-LEFT_ELBOW_ROLL_INITIAL  = 2048
-RIGHT_SHOULDER_PITCH_INITIAL  = 0
-RIGHT_SHOULDER_ROLL_INITIAL  = 1700
-RIGHT_ELBOW_ROLL_INITIAL = 1600
+LEFT_SHOULDER_PITCH_INITIAL  = 136 # -ve out
+LEFT_SHOULDER_ROLL_INITIAL  = 190 # +ve out
+LEFT_ELBOW_ROLL_INITIAL  = 181 # + out
+RIGHT_SHOULDER_PITCH_INITIAL  = 180 # - out
+RIGHT_SHOULDER_ROLL_INITIAL  = 160 #- out
+RIGHT_ELBOW_ROLL_INITIAL = 222 # - out
+BASE_ROLL_INITIAL = 177 # + right
+BASE_ROTATION_INITIAL = 315 # - right
 
-BASE_ROTATION_INITIAL = int(313/0.087891)
+ANGLE_TO_POS_UNIT = 0.087891
 
-# DXL_ALL = [RIGHT_LOWER_ARM_YAW_ID,
-#            LEFT_SHOULDER_PITCH_ID,
-#            LEFT_SHOULDER_ROLL_ID,
-#            LEFT_ELBOW_ROLL_ID,
-#            RIGHT_SHOULDER_PITCH_ID,
-#            RIGHT_SHOULDER_ROLL_ID,
-#            RIGHT_ELBOW_ROLL_ID]
-DXL_ALL = [BASE_ROTATION_MOTOR_ID]
+
+DXL_ALL = [LEFT_SHOULDER_PITCH_ID,
+           LEFT_SHOULDER_ROLL_ID,
+           LEFT_ELBOW_ROLL_ID,
+           RIGHT_SHOULDER_PITCH_ID,
+           RIGHT_SHOULDER_ROLL_ID,
+           RIGHT_ELBOW_ROLL_ID, 
+           BASE_ROLL_MOTOR_ID,
+           BASE_ROTATION_MOTOR_ID, 
+]
+# DXL_ALL = [BASE_ROTATION_MOTOR_ID, BASE_ROLL_MOTOR_ID]
 
 
 
@@ -77,6 +83,9 @@ class MotorInterface:
 
     def __init__(self):
         self.age = 5
+
+        self.in_hug = False 
+
         # Init node
         rospy.init_node('dynamixel_motor_interface', anonymous=False)
     
@@ -89,7 +98,7 @@ class MotorInterface:
         # 0 being South, 2048 being North, 4095 one unit c/w from South
         
         self.sub_motor_goal = rospy.Subscriber('motor/motor_goal', Int32, self.motor_goal_callback)
-        self.sub_camera_vec = rospy.Subscriber('camera/person_angle', Float32, self.camera_vec_callback)
+        self.sub_camera_vec = rospy.Subscriber('camera/person_location', Vector3, self.camera_vec_callback, queue_size=1)
 
         # Connect to motor
         self.configure_motor()
@@ -152,13 +161,14 @@ class MotorInterface:
 
         self.set_velocities_same(DXL_ALL, 0.2) 
 
-        self.move_motors(DXL_ALL, [RIGHT_LOWER_ARM_YAW_INITIAL,
-           LEFT_SHOULDER_PITCH_INITIAL,
+        self.move_motors(DXL_ALL, [LEFT_SHOULDER_PITCH_INITIAL,
            LEFT_SHOULDER_ROLL_INITIAL,
            LEFT_ELBOW_ROLL_INITIAL,
            RIGHT_SHOULDER_PITCH_INITIAL,
            RIGHT_SHOULDER_ROLL_INITIAL,
-           RIGHT_ELBOW_ROLL_INITIAL])
+           RIGHT_ELBOW_ROLL_INITIAL,
+           BASE_ROLL_INITIAL, 
+           BASE_ROTATION_INITIAL,])
 
     def move_arms_up(self):
         self.set_velocity(LEFT_SHOULDER_PITCH_ID, 0.2)
@@ -185,6 +195,40 @@ class MotorInterface:
         self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) - 300)
         return 0
 
+    def up_out(self):
+        self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.2)
+        self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID)- int(15/ANGLE_TO_POS_UNIT))
+        self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.2)
+        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + int(15/ANGLE_TO_POS_UNIT))
+        self.set_velocity(LEFT_SHOULDER_PITCH_ID, 0.2)
+        self.move_motor(LEFT_SHOULDER_PITCH_ID, self.get_motor_position(LEFT_SHOULDER_PITCH_ID) - int(120/ANGLE_TO_POS_UNIT))
+        self.set_velocity(RIGHT_SHOULDER_PITCH_ID, 0.2)
+        self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) + int(120/ANGLE_TO_POS_UNIT))
+        self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
+        self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
+        self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
+        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) - int(70/ANGLE_TO_POS_UNIT))
+        
+    def close_hug(self):
+        self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.2)
+        self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) - int(15/ANGLE_TO_POS_UNIT))
+        self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.2)
+        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + int(15/ANGLE_TO_POS_UNIT))
+        self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
+        self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) - int(70/ANGLE_TO_POS_UNIT))
+        self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
+        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
+
+    def open_hug(self):
+        self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.2)
+        self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) + int(30/ANGLE_TO_POS_UNIT))
+        self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.2)
+        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) - int(30/ANGLE_TO_POS_UNIT))
+        self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
+        self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
+        self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
+        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) - int(70/ANGLE_TO_POS_UNIT))
+
     def hug(self):
         self.move_arms_up()
     
@@ -199,30 +243,49 @@ class MotorInterface:
         sleep(1.5)
         self.disable_all_torques()
 
+    def process_hug(self):
+        self.in_hug = True
+        self.up_out()
+        sleep(3)
+        self.close_hug()
+        sleep(2)
+    
+        while True:
+            sleep(0.5)
+            shoulder_load = self.get_shoulder_load()
+            if (shoulder_load > 48):
+                print("person opening up")
+                self.open_hug()
+                sleep(3)
+                self.reset_arms()
+                sleep(2)
+                break
+        sleep(8)
+        self.in_hug = False
 
-    def wave_right_arm(self):
-        self.set_velocity(RIGHT_LOWER_ARM_YAW_ID, 0.4)
-        self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 1000)
-        self.set_velocity(RIGHT_SHOULDER_PITCH_ID, 0.4)
-        self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) + 300)
-        self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.4)
-        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + 1400)
-        sleep(1)
-        self.set_velocity(RIGHT_LOWER_ARM_YAW_ID, 0.3)
-        self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) + 300)
-        sleep(0.5)
-        self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 600)
-        sleep(0.5)
-        self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) + 600)
-        sleep(0.5)
-        self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 300)
+    # def wave_right_arm(self):
+    #     self.set_velocity(RIGHT_LOWER_ARM_YAW_ID, 0.4)
+    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 1000)
+    #     self.set_velocity(RIGHT_SHOULDER_PITCH_ID, 0.4)
+    #     self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) + 300)
+    #     self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.4)
+    #     self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + 1400)
+    #     sleep(1)
+    #     self.set_velocity(RIGHT_LOWER_ARM_YAW_ID, 0.3)
+    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) + 300)
+    #     sleep(0.5)
+    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 600)
+    #     sleep(0.5)
+    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) + 600)
+    #     sleep(0.5)
+    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 300)
 
-        return 0
+    #     return 0
 
     def move_motors(self, motor_ids, goals):
        
         assert(len(motor_ids) == len(goals))
-        for i in range(len(motor_ids)): self.move_motor(motor_ids[i], goals[i])
+        for i in range(len(motor_ids)): self.move_motor(motor_ids[i], int(goals[i]/ANGLE_TO_POS_UNIT))
 
     def set_velocities(self, motor_ids, velocities):
         assert(len(motor_ids) == len(velocities))
@@ -264,37 +327,42 @@ class MotorInterface:
         for id in DXL_ALL:
             self.move_motor(id, int(goal_position))
 
+
     def camera_vec_callback(self, data):
-        turn_angle = data.data/0.087891
-        print("Desired turn value: ", turn_angle)
-        self.set_velocity(BASE_ROTATION_MOTOR_ID, 0.2)
-        self.move_motor(1, int(BASE_ROTATION_INITIAL - turn_angle))
+        # turn_angle = data.data/ANGLE_TO_POS_UNIT
+        # print("Desired turn value: ", turn_angle)
+        # self.set_velocity(BASE_ROTATION_MOTOR_ID, 0.2)
+        # self.move_motor(1, int(BASE_ROTATION_INITIAL/ANGLE_TO_POS_UNIT - turn_angle))
+        print(data.x, data.y, data.z)
+        self.set_velocity(BASE_ROTATION_MOTOR_ID, 0.05)
+        initialpos = self.get_motor_position(BASE_ROTATION_MOTOR_ID)
+        if (data.z < 400 and data.x <= 150 and data.x > -150):
+            print("processing hug")
+            sleep(2)
+            self.process_hug()
+        elif (data.x > 150 and initialpos*ANGLE_TO_POS_UNIT >= 268): # move right
+            self.move_motor(BASE_ROTATION_MOTOR_ID, int((initialpos*ANGLE_TO_POS_UNIT - 7)/ANGLE_TO_POS_UNIT))
+        elif (data.x < -150 and initialpos*ANGLE_TO_POS_UNIT <= 354):
+            self.move_motor(BASE_ROTATION_MOTOR_ID, int((initialpos*ANGLE_TO_POS_UNIT + 7)/ANGLE_TO_POS_UNIT))
+     
+            
 
         
 
     def run(self):
         # Set frequency
-        rate = rospy.Rate(1)
+        rate = rospy.Rate(2)
 
-        # self.wave_right_arm()
-        # sleep(1.75)
-        # self.reset_arms()
+        # self.disable_all_torques()
+        # return
 
-        
+
+        self.reset_arms()
+        sleep(2)
     
-        # self.hug()
-        sleep(1)
         while not rospy.is_shutdown():
-            sleep(0.5)
             rate.sleep()
-            # print(self.get_shoulder_load())
-            # if self.get_shoulder_load() > 100:
-            #     print("PESRON WANTS TO OPEN")
-            # elif self.get_shoulder_load() > 70:
-            #     print("PERSON DETECTED")
-
-
-
+    
         
         self.disable_all_torques()
         self.portHandler.closePort()

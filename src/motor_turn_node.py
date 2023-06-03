@@ -70,7 +70,6 @@ DXL_ALL = [LEFT_SHOULDER_PITCH_ID,
            RIGHT_ELBOW_ROLL_ID, 
            BASE_ROTATION_MOTOR_ID,
 ]
-# DXL_ALL = [BASE_ROTATION_MOTOR_ID, BASE_ROLL_MOTOR_ID]
 
 
 
@@ -79,10 +78,6 @@ DEVICENAME                  = '/dev/ttyUSB0'
 TORQUE_ENABLE               = 1     # Value for enabling the torque
 TORQUE_DISABLE              = 0     # Value for disabling the torque
 DXL_MOVING_STATUS_THRESHOLD = 20    # Dynamixel moving status threshold
-
-
-WAVE_INTERVAL_IN_SECONDS = 10
-
 
 class MotorInterface:
  
@@ -107,12 +102,14 @@ class MotorInterface:
         self.sub_camera_vec = rospy.Subscriber('camera/person_location', Vector3, self.camera_vec_callback, queue_size=1)
 
         # Connect to motor
-        self.configure_motor()
+        # self.configure_motor()
 
         self.initialised = False
 
-        # If activated, will wave every 10 minutes and not do any hugs
+        # If activated, will wave occasionally and not do any hugs
         self.window_mode = False
+        self.wave_interval = rospy.get_param("/wave_interval", 600)
+
         if rospy.get_param("/mode") == "window":
             print("Window mode active") 
             self.window_mode = True
@@ -372,7 +369,7 @@ class MotorInterface:
 
         while not rospy.is_shutdown():
             # Window mode
-            if self.window_mode and time.time() - self.last_wave_time >= WAVE_INTERVAL_IN_SECONDS:
+            if self.window_mode and time.time() - self.last_wave_time >= self.wave_interval:
                 print("Waving")
                 self.wave(True)
                 self.last_wave_time = time.time()

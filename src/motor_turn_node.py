@@ -5,6 +5,7 @@
 
 from dynamixel_sdk import * # Uses Dynamixel SDK library
 
+import time
 
 import rospy
 from std_msgs.msg import Int32, String, Float32
@@ -15,7 +16,7 @@ from time import sleep
 
 
 MY_DXL = 'X_SERIES'    
-BAUDRATE                    = 57600
+BAUDRATE                       = 57600
 ADDR_TORQUE_ENABLE          = 64
 ADDR_PROFILE_VELOCITY       = 112
 ADDR_GOAL_POSITION          = 116
@@ -35,6 +36,7 @@ VELOCITY_UNIT = 0.229 # RPM
 LEFT_SHOULDER_PITCH_ID = 4
 LEFT_SHOULDER_ROLL_ID = 5
 LEFT_ELBOW_ROLL_ID = 6
+
 RIGHT_SHOULDER_PITCH_ID = 3
 RIGHT_SHOULDER_ROLL_ID = 2
 RIGHT_ELBOW_ROLL_ID = 1
@@ -42,14 +44,20 @@ RIGHT_ELBOW_ROLL_ID = 1
 BASE_ROLL_MOTOR_ID = 7
 BASE_ROTATION_MOTOR_ID = 8
 
-LEFT_SHOULDER_PITCH_INITIAL  = 136 # -ve out
+HEAD_PITCH_MOTOR_ID = 9
+HEAD_YAW_MOTOR_ID = 10
+
+LEFT_SHOULDER_PITCH_INITIAL  = 151 # +                                                                                                                                                                                                                                                                                                                                                                                                                           ve out
 LEFT_SHOULDER_ROLL_INITIAL  = 190 # +ve out
 LEFT_ELBOW_ROLL_INITIAL  = 181 # + out
-RIGHT_SHOULDER_PITCH_INITIAL  = 180 # - out
-RIGHT_SHOULDER_ROLL_INITIAL  = 160 #- out
-RIGHT_ELBOW_ROLL_INITIAL = 222 # - out
+RIGHT_SHOULDER_PITCH_INITIAL  = 165 # - out
+RIGHT_SHOULDER_ROLL_INITIAL  = 190 # + out
+RIGHT_ELBOW_ROLL_INITIAL = 222 # + out
 BASE_ROLL_INITIAL = 177 # + right
 BASE_ROTATION_INITIAL = 315 # - right
+
+HEAD_PITCH_INITIAL = 44 # + up
+HEAD_YAW_INITIAL = 44 # + cw
 
 ANGLE_TO_POS_UNIT = 0.087891
 
@@ -60,8 +68,7 @@ DXL_ALL = [LEFT_SHOULDER_PITCH_ID,
            RIGHT_SHOULDER_PITCH_ID,
            RIGHT_SHOULDER_ROLL_ID,
            RIGHT_ELBOW_ROLL_ID, 
-           BASE_ROLL_MOTOR_ID,
-           BASE_ROTATION_MOTOR_ID, 
+           BASE_ROTATION_MOTOR_ID,
 ]
 # DXL_ALL = [BASE_ROTATION_MOTOR_ID, BASE_ROLL_MOTOR_ID]
 
@@ -74,7 +81,7 @@ TORQUE_DISABLE              = 0     # Value for disabling the torque
 DXL_MOVING_STATUS_THRESHOLD = 20    # Dynamixel moving status threshold
 
 
-
+WAVE_INTERVAL_IN_SECONDS = 10
 
 
 class MotorInterface:
@@ -82,9 +89,8 @@ class MotorInterface:
     
 
     def __init__(self):
-        self.age = 5
-
         self.in_hug = False 
+        self.in_wave = True
 
         # Init node
         rospy.init_node('dynamixel_motor_interface', anonymous=False)
@@ -102,16 +108,28 @@ class MotorInterface:
 
         # Connect to motor
         self.configure_motor()
+
+        self.initialised = False
+
+        # If activated, will wave every 10 minutes and not do any hugs
+        self.window_mode = False
+        if rospy.get_param("/mode") == "window":
+            print("Window mode active") 
+            self.window_mode = True
+        else:
+            print("Default mode active")
+        self.last_wave_time = None
         
 
-
+    def getPacketHandler(self, id):
+        return self.packetHandler
 
     def disable_torque(self, motor_id):
-        dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, motor_id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
+        dxl_comm_result, dxl_error = self.getPacketHandler(motor_id).write1ByteTxRx(self.portHandler, motor_id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
         if dxl_comm_result != COMM_SUCCESS:
-            print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
+            print("%s" % self.getPacketHandler(motor_id).getTxRxResult(dxl_comm_result))
         elif dxl_error != 0:
-            print("%s" % self.packetHandler.getRxPacketError(dxl_error))
+            print("%s" % self.getPacketHandler(motor_id).getRxPacketError(dxl_error))
 
     def disable_all_torques(self):
         for id in DXL_ALL: self.disable_torque(id)
@@ -121,7 +139,7 @@ class MotorInterface:
         self.packetHandler = PacketHandler(PROTOCOL_VERSION)
 
         if self.portHandler.openPort():
-            print("Succeeded to open the port")
+            print("Succeeded to open the port TEST")
         else:
             print("Failed to open the port")
             print("Press any key to terminate...")
@@ -136,25 +154,26 @@ class MotorInterface:
             quit()
 
         # Enable Dynamixel Torque
-        for id in DXL_ALL:
-            dxl_comm_result, dxl_error = self.packetHandler.write1ByteTxRx(self.portHandler, id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
+        for id in DXL_ALL:           
+            dxl_comm_result, dxl_error = self.getPacketHandler(id).write1ByteTxRx(self.portHandler, id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
             if dxl_comm_result != COMM_SUCCESS:
-                print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
+                print("%s" % self.getPacketHandler(id).getTxRxResult(dxl_comm_result))
             elif dxl_error != 0:
-                print("%s" % self.packetHandler.getRxPacketError(dxl_error))
+                print("%s" % self.getPacketHandler(id).getRxPacketError(dxl_error))
             else:
                 print(f"Dynamixel {id} has been successfully connected")
+        
 
     def get_motor_position(self, motor_id):
-        dxl_present_position, dxl_comm_result, dxl_error = self.packetHandler.read2ByteTxRx(self.portHandler, motor_id, ADDR_PRESENT_POSITION)
+        dxl_present_position, dxl_comm_result, dxl_error = self.getPacketHandler(motor_id).read2ByteTxRx(self.portHandler, motor_id, ADDR_PRESENT_POSITION)
         return dxl_present_position
 
     def move_motor(self, motor_id, goal_position):
-        dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(self.portHandler, motor_id, ADDR_GOAL_POSITION, goal_position)
+        dxl_comm_result, dxl_error = self.getPacketHandler(motor_id).write4ByteTxRx(self.portHandler, motor_id, ADDR_GOAL_POSITION, goal_position)
         if dxl_comm_result != COMM_SUCCESS:
-            print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
+            print("%s" % self.getPacketHandler(motor_id).getTxRxResult(dxl_comm_result))
         elif dxl_error != 0:
-            print("%s" % self.packetHandler.getRxPacketError(dxl_error))
+            print("%s" % self.getPacketHandler(motor_id).getRxPacketError(dxl_error))
 
     def reset_arms(self):
         print("RESETTING ARMS")
@@ -167,22 +186,8 @@ class MotorInterface:
            RIGHT_SHOULDER_PITCH_INITIAL,
            RIGHT_SHOULDER_ROLL_INITIAL,
            RIGHT_ELBOW_ROLL_INITIAL,
-           BASE_ROLL_INITIAL, 
            BASE_ROTATION_INITIAL,])
 
-    def move_arms_up(self):
-        self.set_velocity(LEFT_SHOULDER_PITCH_ID, 0.2)
-        self.move_motor(LEFT_SHOULDER_PITCH_ID, self.get_motor_position(LEFT_SHOULDER_PITCH_ID) - 800)
-        self.set_velocity(RIGHT_SHOULDER_PITCH_ID, 0.2)
-        self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) + 800)
-        return 0
-
-    def open_arms(self, amount = 700):
-        self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
-        self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) - amount)
-        self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) + amount)
-        return 0
 
     def close_arms(self):
         self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.2)
@@ -192,56 +197,60 @@ class MotorInterface:
         self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
         self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) + 300)
         self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) - 300)
+        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) + 300)
         return 0
 
     def up_out(self):
         self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.2)
         self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID)- int(15/ANGLE_TO_POS_UNIT))
         self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + int(15/ANGLE_TO_POS_UNIT))
+        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) - int(15/ANGLE_TO_POS_UNIT))
         self.set_velocity(LEFT_SHOULDER_PITCH_ID, 0.2)
-        self.move_motor(LEFT_SHOULDER_PITCH_ID, self.get_motor_position(LEFT_SHOULDER_PITCH_ID) - int(120/ANGLE_TO_POS_UNIT))
+        self.move_motor(LEFT_SHOULDER_PITCH_ID, self.get_motor_position(LEFT_SHOULDER_PITCH_ID) + int(100/ANGLE_TO_POS_UNIT))
         self.set_velocity(RIGHT_SHOULDER_PITCH_ID, 0.2)
-        self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) + int(120/ANGLE_TO_POS_UNIT))
+        self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) - int(100/ANGLE_TO_POS_UNIT))
         self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
         self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
         self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) - int(70/ANGLE_TO_POS_UNIT))
+        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
         
     def close_hug(self):
         self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.2)
         self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) - int(15/ANGLE_TO_POS_UNIT))
         self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + int(15/ANGLE_TO_POS_UNIT))
+        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) - int(15/ANGLE_TO_POS_UNIT))
         self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
         self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) - int(70/ANGLE_TO_POS_UNIT))
         self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
+        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) - int(70/ANGLE_TO_POS_UNIT))
 
     def open_hug(self):
         self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.2)
         self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) + int(30/ANGLE_TO_POS_UNIT))
         self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) - int(30/ANGLE_TO_POS_UNIT))
+        self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + int(30/ANGLE_TO_POS_UNIT))
         self.set_velocity(LEFT_SHOULDER_ROLL_ID, 0.2)
         self.move_motor(LEFT_SHOULDER_ROLL_ID, self.get_motor_position(LEFT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
         self.set_velocity(RIGHT_SHOULDER_ROLL_ID, 0.2)
-        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) - int(70/ANGLE_TO_POS_UNIT))
+        self.move_motor(RIGHT_SHOULDER_ROLL_ID, self.get_motor_position(RIGHT_SHOULDER_ROLL_ID) + int(70/ANGLE_TO_POS_UNIT))
 
-    def hug(self):
-        self.move_arms_up()
-    
-        self.open_arms()
-        sleep(0.75)
-        self.close_arms()
-
-        sleep(3)
-        self.open_arms(amount = 400)
+    def wave(self, reset_after = False):
+        self.set_velocity(RIGHT_SHOULDER_PITCH_ID, 0.35)
+        self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) - int(120/ANGLE_TO_POS_UNIT))
         sleep(1)
-        self.reset_arms()
-        sleep(1.5)
-        self.disable_all_torques()
+        self.set_velocity(LEFT_ELBOW_ROLL_ID, 0.4)
+        self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) - int(50/ANGLE_TO_POS_UNIT))
+        sleep(0.5)
+        self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) + int(60/ANGLE_TO_POS_UNIT))
+        sleep(0.5)
+        self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) - int(60/ANGLE_TO_POS_UNIT))
+        sleep(0.5)
+        self.move_motor(LEFT_ELBOW_ROLL_ID, self.get_motor_position(LEFT_ELBOW_ROLL_ID) + int(50/ANGLE_TO_POS_UNIT))
+        if reset_after:
+            sleep(0.5)
+            self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) + int(120/ANGLE_TO_POS_UNIT))
+            sleep(1)
+
 
     def process_hug(self):
         self.in_hug = True
@@ -249,11 +258,12 @@ class MotorInterface:
         sleep(3)
         self.close_hug()
         sleep(2)
-    
+        
+        start_time = time.time()
         while True:
             sleep(0.5)
             shoulder_load = self.get_shoulder_load()
-            if (shoulder_load > 48):
+            if shoulder_load > 48 or time.time() - start_time >= 3.5:
                 print("person opening up")
                 self.open_hug()
                 sleep(3)
@@ -262,25 +272,6 @@ class MotorInterface:
                 break
         sleep(8)
         self.in_hug = False
-
-    # def wave_right_arm(self):
-    #     self.set_velocity(RIGHT_LOWER_ARM_YAW_ID, 0.4)
-    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 1000)
-    #     self.set_velocity(RIGHT_SHOULDER_PITCH_ID, 0.4)
-    #     self.move_motor(RIGHT_SHOULDER_PITCH_ID, self.get_motor_position(RIGHT_SHOULDER_PITCH_ID) + 300)
-    #     self.set_velocity(RIGHT_ELBOW_ROLL_ID, 0.4)
-    #     self.move_motor(RIGHT_ELBOW_ROLL_ID, self.get_motor_position(RIGHT_ELBOW_ROLL_ID) + 1400)
-    #     sleep(1)
-    #     self.set_velocity(RIGHT_LOWER_ARM_YAW_ID, 0.3)
-    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) + 300)
-    #     sleep(0.5)
-    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 600)
-    #     sleep(0.5)
-    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) + 600)
-    #     sleep(0.5)
-    #     self.move_motor(RIGHT_LOWER_ARM_YAW_ID, self.get_motor_position(RIGHT_LOWER_ARM_YAW_ID) - 300)
-
-    #     return 0
 
     def move_motors(self, motor_ids, goals):
        
@@ -300,23 +291,23 @@ class MotorInterface:
         max_speed = VELOCITY_UNIT * VELOCITY_LIMIT
         new_rpm = int(speed_frac * max_speed)
 
-        dxl_comm_result, dxl_error = self.packetHandler.write4ByteTxRx(self.portHandler, motor_id, ADDR_PROFILE_VELOCITY, new_rpm)
+        dxl_comm_result, dxl_error = self.getPacketHandler(motor_id).write4ByteTxRx(self.portHandler, motor_id, ADDR_PROFILE_VELOCITY, new_rpm)
         if dxl_comm_result != COMM_SUCCESS:
-            print("%s" % self.packetHandler.getTxRxResult(dxl_comm_result))
+            print("%s" % self.getPacketHandler(motor_id).getTxRxResult(dxl_comm_result))
         elif dxl_error != 0:
-            print("%s" % self.packetHandler.getRxPacketError(dxl_error))
+            print("%s" % self.getPacketHandler(motor_id).getRxPacketError(dxl_error))
 
         return 0
 
     def get_elbow_load(self):
-        present_load_l, dxl_comm_result, dxl_error = self.packetHandler.read2ByteTxRx(self.portHandler, LEFT_ELBOW_ROLL_ID, ADDR_PRESENT_LOAD)
-        present_load_r, dxl_comm_result, dxl_error = self.packetHandler.read2ByteTxRx(self.portHandler, RIGHT_ELBOW_ROLL_ID, ADDR_PRESENT_LOAD)
+        present_load_l, dxl_comm_result, dxl_error = self.getPacketHandler(LEFT_ELBOW_ROLL_ID).read2ByteTxRx(self.portHandler, LEFT_ELBOW_ROLL_ID, ADDR_PRESENT_LOAD)
+        present_load_r, dxl_comm_result, dxl_error = self.getPacketHandler(RIGHT_ELBOW_ROLL_ID).read2ByteTxRx(self.portHandler, RIGHT_ELBOW_ROLL_ID, ADDR_PRESENT_LOAD)
 
         return max(min(present_load_r, 65535-present_load_r), min(present_load_l, 65535-present_load_l))
 
     def get_shoulder_load(self):
-        present_load_l, dxl_comm_result, dxl_error = self.packetHandler.read2ByteTxRx(self.portHandler, LEFT_SHOULDER_ROLL_ID, ADDR_PRESENT_LOAD)
-        present_load_r, dxl_comm_result, dxl_error = self.packetHandler.read2ByteTxRx(self.portHandler, RIGHT_SHOULDER_ROLL_ID, ADDR_PRESENT_LOAD)
+        present_load_l, dxl_comm_result, dxl_error = self.getPacketHandler(LEFT_SHOULDER_ROLL_ID).read2ByteTxRx(self.portHandler, LEFT_SHOULDER_ROLL_ID, ADDR_PRESENT_LOAD)
+        present_load_r, dxl_comm_result, dxl_error = self.getPacketHandler(RIGHT_SHOULDER_ROLL_ID).read2ByteTxRx(self.portHandler, RIGHT_SHOULDER_ROLL_ID, ADDR_PRESENT_LOAD)
 
         return max(min(present_load_r, 65535-present_load_r), min(present_load_l, 65535-present_load_l))
 
@@ -328,18 +319,34 @@ class MotorInterface:
             self.move_motor(id, int(goal_position))
 
 
+    def head_follow(self, y_pos):
+        initialpos = self.get_motor_position(HEAD_PITCH_MOTOR_ID)
+        if y_pos - (-100) < -50 : # person is below, move head down
+            self.set_velocity(HEAD_PITCH_MOTOR_ID, 0.05)
+            self.move_motor(HEAD_PITCH_MOTOR_ID, int((initialpos*ANGLE_TO_POS_UNIT - 7)/ANGLE_TO_POS_UNIT))
+
+        elif y_pos - (-100) > 50: # person is above, move head up
+            self.set_velocity(HEAD_PITCH_MOTOR_ID, 0.05)
+            self.move_motor(HEAD_PITCH_MOTOR_ID, int((initialpos*ANGLE_TO_POS_UNIT + 7)/ANGLE_TO_POS_UNIT))
+            
+
+
     def camera_vec_callback(self, data):
-        # turn_angle = data.data/ANGLE_TO_POS_UNIT
-        # print("Desired turn value: ", turn_angle)
-        # self.set_velocity(BASE_ROTATION_MOTOR_ID, 0.2)
-        # self.move_motor(1, int(BASE_ROTATION_INITIAL/ANGLE_TO_POS_UNIT - turn_angle))
-        print(data.x, data.y, data.z)
+        if not self.initialised: return
+        
+        if self.window_mode:
+            return
+
         self.set_velocity(BASE_ROTATION_MOTOR_ID, 0.05)
         initialpos = self.get_motor_position(BASE_ROTATION_MOTOR_ID)
-        if (data.z < 400 and data.x <= 150 and data.x > -150):
+        if (data.z < 500 and data.x <= 150 and data.x > -150):
             print("processing hug")
             sleep(2)
             self.process_hug()
+        elif (data.z < 1000 and data.x <= 150 and data.x > -150):
+            print("processing wave")
+            self.wave(True)
+            sleep(5)
         elif (data.x > 150 and initialpos*ANGLE_TO_POS_UNIT >= 268): # move right
             self.move_motor(BASE_ROTATION_MOTOR_ID, int((initialpos*ANGLE_TO_POS_UNIT - 7)/ANGLE_TO_POS_UNIT))
         elif (data.x < -150 and initialpos*ANGLE_TO_POS_UNIT <= 354):
@@ -353,14 +360,22 @@ class MotorInterface:
         # Set frequency
         rate = rospy.Rate(2)
 
-        # self.disable_all_torques()
-        # return
-
-
         self.reset_arms()
         sleep(2)
-    
+        self.wave()
+        sleep(2)
+        self.reset_arms()
+        self.last_wave_time = time.time()
+        sleep(4)
+
+        self.initialised = True
+
         while not rospy.is_shutdown():
+            # Window mode
+            if self.window_mode and time.time() - self.last_wave_time >= WAVE_INTERVAL_IN_SECONDS:
+                print("Waving")
+                self.wave(True)
+                self.last_wave_time = time.time()
             rate.sleep()
     
         

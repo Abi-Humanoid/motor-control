@@ -108,7 +108,7 @@ class MotorInterface:
         self.packetHandler = PacketHandler(PROTOCOL_VERSION)
 
         if self.portHandler.openPort():
-            print("Succeeded to open the port")
+            print("Succeeded to open the port test")
         else:
             print("Failed to open the port")
             print("Press any key to terminate...")

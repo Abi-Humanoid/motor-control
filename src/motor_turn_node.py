@@ -102,7 +102,7 @@ class MotorInterface:
         self.sub_camera_vec = rospy.Subscriber('camera/person_location', Vector3, self.camera_vec_callback, queue_size=1)
 
         # Connect to motor
-        # self.configure_motor()
+        self.configure_motor()
 
         self.initialised = False
 

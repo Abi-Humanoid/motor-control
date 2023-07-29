@@ -6,6 +6,7 @@
 from dynamixel_sdk import * # Uses Dynamixel SDK library
 
 import time
+from datetime import datetime
 
 import rospy
 from std_msgs.msg import Int32, String, Float32
@@ -79,10 +80,12 @@ TORQUE_ENABLE               = 1     # Value for enabling the torque
 TORQUE_DISABLE              = 0     # Value for disabling the torque
 DXL_MOVING_STATUS_THRESHOLD = 20    # Dynamixel moving status threshold
 
-class MotorInterface:
- 
-    
 
+# Constants for start and end hour
+START_HOUR = 7 # 8pm
+END_HOUR = 19 # 7pm
+
+class MotorInterface:
     def __init__(self):
         self.in_hug = False 
         self.in_wave = True
@@ -117,6 +120,13 @@ class MotorInterface:
             print("Default mode active")
         self.last_wave_time = None
         
+
+    # Returns true if time is 7am to 7pm
+    def time_enabled(self):
+        now = datetime.now()
+        todayStart = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
+        todayEnd = now.replace(hour=END_HOUR, minute=0, second=0, microsecond=0)
+        return now >= todayStart and now <= todayEnd
 
     def getPacketHandler(self, id):
         return self.packetHandler
@@ -329,7 +339,7 @@ class MotorInterface:
 
 
     def camera_vec_callback(self, data):
-        if not self.initialised: return
+        if not self.initialised or not self.time_enabled(): return
         
         if self.window_mode:
             return
@@ -369,7 +379,7 @@ class MotorInterface:
 
         while not rospy.is_shutdown():
             # Window mode
-            if self.window_mode and time.time() - self.last_wave_time >= self.wave_interval:
+            if self.window_mode and time.time() - self.last_wave_time >= self.wave_interval and self.time_enabled():
                 print("Waving")
                 self.wave(True)
                 self.last_wave_time = time.time()

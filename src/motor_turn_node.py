@@ -89,6 +89,7 @@ class MotorInterface:
     def __init__(self):
         self.in_hug = False 
         self.in_wave = True
+        self.torque_enabled = False
 
         # Init node
         rospy.init_node('dynamixel_motor_interface', anonymous=False)
@@ -138,8 +139,20 @@ class MotorInterface:
         elif dxl_error != 0:
             print("%s" % self.getPacketHandler(motor_id).getRxPacketError(dxl_error))
 
+    def enable_all_torques(self):
+        for id in DXL_ALL:           
+            dxl_comm_result, dxl_error = self.getPacketHandler(id).write1ByteTxRx(self.portHandler, id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
+            if dxl_comm_result != COMM_SUCCESS:
+                print("%s" % self.getPacketHandler(id).getTxRxResult(dxl_comm_result))
+            elif dxl_error != 0:
+                print("%s" % self.getPacketHandler(id).getRxPacketError(dxl_error))
+            else:
+                print(f"Dynamixel {id} has been successfully connected (torque enabled)")
+        self.torque_enabled = True
+
     def disable_all_torques(self):
         for id in DXL_ALL: self.disable_torque(id)
+        self.torque_enabled = False
 
     def configure_motor(self):
         self.portHandler = PortHandler(DEVICENAME)
@@ -161,14 +174,7 @@ class MotorInterface:
             quit()
 
         # Enable Dynamixel Torque
-        for id in DXL_ALL:           
-            dxl_comm_result, dxl_error = self.getPacketHandler(id).write1ByteTxRx(self.portHandler, id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
-            if dxl_comm_result != COMM_SUCCESS:
-                print("%s" % self.getPacketHandler(id).getTxRxResult(dxl_comm_result))
-            elif dxl_error != 0:
-                print("%s" % self.getPacketHandler(id).getRxPacketError(dxl_error))
-            else:
-                print(f"Dynamixel {id} has been successfully connected")
+        self.enable_all_torques()
         
 
     def get_motor_position(self, motor_id):
@@ -378,6 +384,11 @@ class MotorInterface:
         self.initialised = True
 
         while not rospy.is_shutdown():
+            if not self.in_hug and not self.in_wave and not self.time_enabled():
+                self.disable_all_torques()
+            elif self.time_enabled() and not self.torque_enabled:
+                self.enable_all_torques()
+
             # Window mode
             if self.window_mode and time.time() - self.last_wave_time >= self.wave_interval and self.time_enabled():
                 print("Waving")

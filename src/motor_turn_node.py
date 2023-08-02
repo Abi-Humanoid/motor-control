@@ -88,7 +88,7 @@ END_HOUR = 19 # 7pm
 class MotorInterface:
     def __init__(self):
         self.in_hug = False 
-        self.in_wave = True
+        self.in_wave = False
         self.torque_enabled = False
 
         # Init node
@@ -186,6 +186,7 @@ class MotorInterface:
         if dxl_comm_result != COMM_SUCCESS:
             print("%s" % self.getPacketHandler(motor_id).getTxRxResult(dxl_comm_result))
         elif dxl_error != 0:
+            print(f"error for motor {motor_id}")
             print("%s" % self.getPacketHandler(motor_id).getRxPacketError(dxl_error))
 
     def reset_arms(self):
